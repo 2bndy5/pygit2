@@ -7,6 +7,8 @@ on:
     - wheels-*
     tags:
     - 'v*'
+  pull_request: # REMOVE THIS BEFORE PR
+    branches: [master]
 
 jobs:
   build_wheels:
@@ -21,9 +23,19 @@ jobs:
           os: ubuntu-24.04-arm
         - name: macos
           os: macos-13
+        - name: windows-x64
+          os: windows-latest
+        - name: windows-x32
+          os: windows-latest
+        - name: windows-arm64
+          # https://github.com/actions/partner-runner-images#available-images
+          os: windows-11-arm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          # avoid leaking credentials in uploaded artifacts
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -33,6 +45,8 @@ jobs:
         run: python -m pip install cibuildwheel~=3.1.1
 
       - name: Build wheels
+        env:
+          CIBW_ARCHS_WINDOWS: ${{ matrix.name == 'windows-x32' && 'auto32' || 'native' }}
         run: python -m cibuildwheel --output-dir wheelhouse
 
       - uses: actions/upload-artifact@v4
@@ -45,7 +59,10 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          # avoid leaking credentials in uploaded artifacts
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -69,13 +86,30 @@ jobs:
           name: wheels-linux-ppc
           path: ./wheelhouse/*.whl
 
+  twine-check:
+    name: Twine check
+    # It is good to do this check on non-tagged commits.
+    # Note, pypa/gh-action-pypi-publish (see job below) does this automatically.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    needs: [build_wheels, build_wheels_ppc]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      - name: check distribution files
+        run: pipx run twine check dist/*
+
   pypi:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build_wheels, build_wheels_ppc]
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v5
       with:
         path: dist
         pattern: wheels-*
